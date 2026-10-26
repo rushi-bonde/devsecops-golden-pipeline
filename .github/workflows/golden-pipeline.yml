@@ -1,0 +1,52 @@
+name: "DevSecOps Golden Pipeline"
+
+on:
+  pull_request:
+    branches: [ "main" ]
+  push:
+    branches: [ "main" ]
+
+jobs:
+  secrets_and_linting:
+    name: "Stage 1: Secrets & IaC Linting"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: "GitLeaks Secret Scan"
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  security_posture:
+    name: "Stage 2: Static Vulnerability & Policy Gates"
+    needs: secrets_and_linting
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: "Checkov IaC Compliance Gate"
+        uses: bridgecrewio/checkov-action@master
+        with:
+          output_format: cli
+          framework: terraform,arm,kubernetes
+          soft_fail: false
+
+      - name: "Trivy Container & Dependency Scan"
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: "fs"
+          severity: "CRITICAL,HIGH"
+
+  finops_and_budget:
+    name: "Stage 3: FinOps Cloud Cost Gate"
+    needs: security_posture
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: "Run Infracost Cost Guardrail"
+        run: |
+          echo "Evaluating Infracost cloud delta..."
+          python3 scripts/finops-budget-check.py --max-delta 100.0
